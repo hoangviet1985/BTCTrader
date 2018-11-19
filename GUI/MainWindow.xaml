@@ -23,7 +23,7 @@
         <Label Content="Email" HorizontalAlignment="Left" Height="21" Margin="329,39,0,0" VerticalAlignment="Top" Width="66" Background="#FF514C4C" Foreground="#FFEE6B16" FontSize="10"/>
         <Label Content="Password" HorizontalAlignment="Left" Height="21" Margin="329,65,0,0" VerticalAlignment="Top" Width="66" Background="#FF514C4C" Foreground="#FFEE6B16" FontSize="10"/>
         <TextBox x:Name="emailTb" HorizontalAlignment="Left" Height="21" Margin="400,39,0,0" TextWrapping="Wrap" Text="viethoangdinh0503@gmail.com" VerticalAlignment="Top" Width="233" FontSize="10"/>
-        <PasswordBox x:Name="passwordTb" HorizontalAlignment="Left" Margin="400,65,0,0" VerticalAlignment="Top" Width="233" Height="20" FontSize="10" Password="Vietbo19*%"/>
+        <PasswordBox x:Name="passwordTb" HorizontalAlignment="Left" Margin="400,65,0,0" VerticalAlignment="Top" Width="233" Height="20" FontSize="10" Password="xxxxxxxx"/>
         <TextBlock x:Name="errorTb" HorizontalAlignment="Left" Height="110" Margin="0,310,-0.4,0" TextWrapping="Wrap" Text="" VerticalAlignment="Top" Width="794" Foreground="#FFE20808" Background="#FFCAC3C3"/>
         <Label Content="Current USD" HorizontalAlignment="Left" Height="30" Margin="42,100,0,0" VerticalAlignment="Top" Width="93" Background="#FF514C4C" Foreground="#FFEE6B16"/>
         <Label x:Name="currentUSDLb" Content="" HorizontalAlignment="Left" Height="30" Margin="140,100,0,0" VerticalAlignment="Top" Width="119" Background="#FF514C4C" Foreground="#FFEE6B16" FontSize="14" FontWeight="Bold"/>

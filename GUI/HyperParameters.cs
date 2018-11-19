@@ -63,6 +63,6 @@ namespace GUI
 
         public const string fromAddress = "hoangviet26985@gmail.com";
         public const string toAddresses = "6176103632@tmomail.net";
-        public const string fromPassword = "vietbo1985";
+        public const string fromPassword = "xxxxxxxxxx";
     }
 }
