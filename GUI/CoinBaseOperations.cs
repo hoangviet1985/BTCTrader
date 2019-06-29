@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Net.Mail;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace GUI
 {
@@ -36,11 +37,11 @@ namespace GUI
        
 
         private static bool turnOfBuying = true;
-        private static bool orderExists = false;
-        private static double buyPriceOfBTC = 0;
-        private static double sellPriceOfBTC = 0;
+        private static string currentOpenOderId = "";
+        private static decimal buyPriceOfBTC = 0;
+        private static decimal sellPriceOfBTC = 0;
 
-        public static double stableBTCPrice = 0;
+        public static decimal stableBTCPrice = 0;
         public static DateTimeOffset timeAtCurrentStablePrice = DateTimeOffset.MinValue;
         public static int timesOfGoToNewMuchDifferentStablePrice = 0;
         public static bool isBTCPriceUnstable = false;
@@ -55,22 +56,38 @@ namespace GUI
         /// </summary>
         /// <param name="currentBTCPrice">current market BTC price</param>
         /// <returns>string of details of current existing orders</returns>
-        public static string DealWithExistingOrders(double currentBTCPrice)
+        public static string DealWithExistingOrders(decimal currentBTCPrice, CoinbasePro.CoinbaseProClient coinbaseProClient)
         {
-            var saleAndBuyBTCsVolumeAtOptimal = GetSellAndBuyBTCsVolumeAtOptimal();
+            var saleAndBuyBTCsVolumeAtOptimal = GetSellAndBuyBTCsVolumeAtOptimalAsync();
             string filledOrderDetails = "";
-            if (orderExists &&
-                (Math.Abs(saleAndBuyBTCsVolumeAtOptimal.Item1 - saleAndBuyBTCsVolumeAtOptimal.Item2) < HyperParameters.DiffBTCsBetweenCurrSellAndBuyToCancelAll) &&
+            Task.Run(async () =>
+            {
+                var fillResponse = await MainWindow.coinbaseProClient.FillsService.GetFillsByProductIdAsync(CoinbasePro.Shared.Types.ProductType.BtcUsd, 10000, 0);
+                var pageIterator = fillResponse.GetEnumerator();
+                while (pageIterator.MoveNext())
+                {
+                    var transIterator = pageIterator.Current.GetEnumerator();
+                    while (transIterator.MoveNext())
+                    {
+                        filledOrderDetails += "ID: " + transIterator.Current.OrderId + "\t" +
+                        "BTCprice: " + transIterator.Current.Price + "\t" +
+                        "Volume: " + transIterator.Current.Size + "\t" +
+                        "Fee: " + transIterator.Current.Fee + "\t" +
+                        "TimeCreated:" + transIterator.Current.CreatedAt + "\n";
+                    }
+                }
+            });
+            if (!currentOpenOderId.Equals("") &&
+                (Math.Abs(saleAndBuyBTCsVolumeAtOptimal.Result.Item1 - saleAndBuyBTCsVolumeAtOptimal.Result.Item2) < HyperParameters.DiffBTCsBetweenCurrSellAndBuyToCancelAll) &&
                 ((turnOfBuying && (sellPriceOfBTC < currentBTCPrice + HyperParameters.BuySellVolumeIsBalanceAndOrderTooCloseCurrentBTCPrice)) ||
                 (!turnOfBuying && (buyPriceOfBTC > currentBTCPrice - HyperParameters.BuySellVolumeIsBalanceAndOrderTooCloseCurrentBTCPrice))))
             {
-                CancelAllOrders(ref filledOrderDetails);
+                CancelAllOrders();
             }
             else
             {
                 ConsiderToCancelOpenOrders(
-                    ref filledOrderDetails,
-                    saleAndBuyBTCsVolumeAtOptimal,
+                    saleAndBuyBTCsVolumeAtOptimal.Result,
                     currentBTCPrice);
             }
             return filledOrderDetails;
@@ -82,68 +99,49 @@ namespace GUI
         /// <param name="currentBTCPrice">current market price of BTC</param>
         /// <param name="numOfBTCsForBuy">number of BTCs for buying</param>
         /// <param name="numOfBTCsForSell">number of BTCc for selling</param>
-        public static void ConsiderToBuyOrSell(double currentBTCPrice, string numOfBTCsForBuy, string numOfBTCsForSell)
+        public static void ConsiderToBuyOrSell(decimal currentBTCPrice, decimal numOfBTCsForBuy, decimal numOfBTCsForSell)
         {
-            try
+            var saleAndBuyBTCsVolumeAtOptimal = GetSellAndBuyBTCsVolumeAtOptimalAsync();
+            if (turnOfBuying && currentOpenOderId.Equals(""))
             {
-                var saleAndBuyBTCsVolumeAtOptimal = GetSellAndBuyBTCsVolumeAtOptimal();
-                if (turnOfBuying && !orderExists)
+                if ((saleAndBuyBTCsVolumeAtOptimal.Result.Item2 - saleAndBuyBTCsVolumeAtOptimal.Result.Item1 >= HyperParameters.DiffBTCsBetweenCurrSellAndBuyToCancelAll))
                 {
-                    if ((saleAndBuyBTCsVolumeAtOptimal.Item2 - saleAndBuyBTCsVolumeAtOptimal.Item1 >= HyperParameters.DiffBTCsBetweenCurrSellAndBuyToCancelAll))
+                    buyPriceOfBTC = currentBTCPrice - 
+                        HyperParameters.BuySellOffsetBasedOnCurrentBTCPrice -
+                        currentBTCPrice * numOfBTCsForBuy * HyperParameters.FeePriceRatio;
+                    // set buy order
+                    Task.Run(async () =>
                     {
-                        InitializeElement(tradingWebDriver, out numBTCToBuySellElem, CoinBaseXPaths.LimitModeInputBTCsToBuySellTextBox);
-                        numBTCToBuySellElem.SendKeys(numOfBTCsForBuy);
-                        buyPriceOfBTC = currentBTCPrice - HyperParameters.BuySellOffsetBasedOnCurrentBTCPrice;
-                        InitializeElement(tradingWebDriver, out setSellBuyPriceElem, CoinBaseXPaths.LimitModeInputBTCPriceTextBox);
-                        setSellBuyPriceElem.SendKeys(buyPriceOfBTC.ToString());
-                        InitializeElement(tradingWebDriver, out switchToBuyTabElem, CoinBaseXPaths.BuyTab);
-                        switchToBuyTabElem.Click();
-                        InitializeElement(tradingWebDriver, out CoinBaseOperations.switchToLimitTabElem, CoinBaseXPaths.LimitTab);
-                        switchToLimitTabElem.Click();
-                        placeBuySaleOrderButtonElem.Click();
-
-                        var orderRejected = TryFindElement(tradingWebDriver, CoinBaseXPaths.OrderRejectedMessageCloseSymbol, out IWebElement xSymbol);
-                        if (orderRejected)
-                        {
-                            xSymbol.Click();
-                        }
-                        else
-                        {
-                            turnOfBuying = false;
-                            orderExists = true;
-                        }
-                    }
-                }
-                else if (!orderExists)
-                {
-                    if (currentBTCPrice >= buyPriceOfBTC + HyperParameters.ExpectedBenefitOfOneCircle)
-                    {
-                        InitializeElement(tradingWebDriver, out numBTCToBuySellElem, CoinBaseXPaths.LimitModeInputBTCsToBuySellTextBox);
-                        numBTCToBuySellElem.SendKeys(numOfBTCsForSell);
-                        sellPriceOfBTC = currentBTCPrice + HyperParameters.BuySellOffsetBasedOnCurrentBTCPrice;
-                        InitializeElement(tradingWebDriver, out setSellBuyPriceElem, CoinBaseXPaths.LimitModeInputBTCPriceTextBox);
-                        setSellBuyPriceElem.SendKeys(sellPriceOfBTC.ToString());
-                        InitializeElement(tradingWebDriver, out switchToSellTabElem, CoinBaseXPaths.SellTab);
-                        switchToSellTabElem.Click();
-                        InitializeElement(tradingWebDriver, out CoinBaseOperations.switchToLimitTabElem, CoinBaseXPaths.LimitTab);
-                        switchToLimitTabElem.Click();
-                        placeBuySaleOrderButtonElem.Click();
-
-                        var orderRejected = TryFindElement(tradingWebDriver, CoinBaseXPaths.OrderRejectedMessageCloseSymbol, out IWebElement xSymbol);
-                        if (orderRejected)
-                        {
-                            xSymbol.Click();
-                        }
-                        else
-                        {
-                            turnOfBuying = true;
-                            orderExists = true;
-                        }
-                    }
+                        var order = await MainWindow.coinbaseProClient.OrdersService.PlaceLimitOrderAsync(
+                            CoinbasePro.Services.Orders.Types.OrderSide.Buy,
+                            CoinbasePro.Shared.Types.ProductType.BtcUsd,
+                            numOfBTCsForBuy,
+                            currentBTCPrice);
+                        currentOpenOderId = order.Id.ToString();
+                        turnOfBuying = false;
+                    });
                 }
             }
-            catch (Exception)
-            { }
+            else if (currentOpenOderId.Equals(""))
+            {
+                if (currentBTCPrice >= buyPriceOfBTC + HyperParameters.ExpectedBenefitOfOneCircle)
+                {
+                    sellPriceOfBTC = currentBTCPrice + 
+                        HyperParameters.BuySellOffsetBasedOnCurrentBTCPrice +
+                        currentBTCPrice * numOfBTCsForSell * HyperParameters.FeePriceRatio;
+                    // set sell order
+                    Task.Run(async () =>
+                    {
+                        var order = await MainWindow.coinbaseProClient.OrdersService.PlaceLimitOrderAsync(
+                            CoinbasePro.Services.Orders.Types.OrderSide.Buy,
+                            CoinbasePro.Shared.Types.ProductType.BtcUsd,
+                            numOfBTCsForSell,
+                            currentBTCPrice);
+                        currentOpenOderId = order.Id.ToString();
+                        turnOfBuying = true;
+                    });
+                }
+            }
         }
 
         /// <summary>
@@ -151,138 +149,15 @@ namespace GUI
         /// records the number of BTCs that can be bought at highest price at the moment
         /// </summary>
         /// <returns>the pair of the two values mentioned above</returns>
-        private static Tuple<double, double> GetSellAndBuyBTCsVolumeAtOptimal()
+        private static async System.Threading.Tasks.Task<Tuple<decimal, decimal>> GetSellAndBuyBTCsVolumeAtOptimalAsync()
         {
-            double numOfBTCsForSaleAtLowestPrice = 0;
-            double numOfBTCsOrderedAtHighestPrice = 0;
-            while (true)
-            {
-                try
-                {
-                    var action = new Actions(tradingWebDriver);
-                    InitializeElement(tradingWebDriver, out tradingSwitchToDepthChartElem, CoinBaseXPaths.DepthChartButton);
-                    tradingSwitchToDepthChartElem.Click();
-                    InitializeElement(tradingWebDriver, out IWebElement switchToMarketTabElem, CoinBaseXPaths.MarketTab);
-                    switchToMarketTabElem.Click();
+            var productsOrderBookResponse = await MainWindow.coinbaseProClient.ProductsService.GetProductOrderBookAsync(CoinbasePro.Shared.Types.ProductType.BtcUsd, CoinbasePro.Services.Products.Types.ProductLevel.One);
+            var enumerator0 = productsOrderBookResponse.Asks.GetEnumerator();
+            var enumerator1 = productsOrderBookResponse.Bids.GetEnumerator();
+            enumerator0.MoveNext();
+            enumerator1.MoveNext();
 
-                    InitializeElement(tradingWebDriver, out tradingDepthChartCanvasElem, CoinBaseXPaths.DepthChartCanvas);
-                    InitializeElement(tradingWebDriver, out IWebElement saleElem, CoinBaseXPaths.NumOfBTCsWhenClickOnLastLineSellPartOrderBook);
-                    InitializeElement(tradingWebDriver, out IWebElement buyElem, CoinBaseXPaths.MarketModeInputBTCsToSellTextBox);
-                    InitializeElement(tradingWebDriver, out IWebElement labelUSDBTCElem, CoinBaseXPaths.LabelNextToMarketModeInputBTCsToSellTextBox);
-
-                    action.MoveToElement(tradingDepthChartCanvasElem, tradingDepthChartCanvasElem.Size.Width / 2 + 1, 1).Click().Perform();
-                    string saleElemText = saleElem.Text;
-                    if(saleElemText[0] != '$')
-                    {
-                        numOfBTCsForSaleAtLowestPrice = double.Parse(saleElemText.Substring(1));
-                    }
-                    
-                    action.MoveToElement(tradingDepthChartCanvasElem, tradingDepthChartCanvasElem.Size.Width / 2, 1).Click().Perform();
-                    if(labelUSDBTCElem.Text == "BTC")
-                    {
-                        numOfBTCsOrderedAtHighestPrice = double.Parse(buyElem.GetAttribute("value"));
-                    }
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    if ((ex is WebDriverException) || IsBrowserClosed(tradingWebDriver))
-                    {
-                        break;
-                    }
-                }
-            }
-
-            return new Tuple<double, double>(numOfBTCsForSaleAtLowestPrice, numOfBTCsOrderedAtHighestPrice);
-        }
-
-        /// <summary>
-        /// initializes a variable to hold a web page's element
-        /// </summary>
-        /// <param name="element">the web element's variable</param>
-        /// <param name="elementXPath">the string represents XPath of the element in the page</param>
-        /// <param name="timeout">time out in ms for the searching operation</param>
-        public static void InitializeElement(IWebDriver webDriver, out IWebElement element, string elementXPath, int timeout = 150)
-        {
-            bool success = false;
-            int elapsed = 0;
-            element = null;
-            while ((!success) && (elapsed < timeout))
-            {
-                try
-                {
-                    Thread.Sleep(10);
-                    elapsed += 10;
-                    element = webDriver.FindElement(By.XPath(elementXPath));
-                    success = true;
-                }
-                catch (Exception ex)
-                {
-                    if (!(ex is NoSuchElementException))
-                    {
-                        throw;
-                    }
-                }
-            }
-            if (!success)
-            {
-                throw new NoSuchElementException("XPath not found: " + elementXPath);
-            }
-        }
-
-        /// <summary>
-        /// checks if the chrome browser instance associated with the webdriver is closed
-        /// </summary>
-        /// <param name="driver">the web driver instance that the current browser instance associated with</param>
-        /// <returns>true if the browser instance is closed, false otherwise</returns>
-        public static bool IsBrowserClosed(IWebDriver driver)
-        {
-            bool isClosed = false;
-            try
-            {
-                var title = driver.Title;
-            }
-            catch (InvalidOperationException)
-            {
-                isClosed = true;
-            }
-            return isClosed;
-        }
-
-        /// <summary>
-        /// write a filled order to a log file
-        /// </summary>
-        /// <param name="orderIndex">index of the order in list of on-page orders</param>
-        /// <returns>a string represents the order's details</returns>
-        private static string WriteFilledTransactionToLogFile(int orderIndex)
-        {
-            var buySellSide = tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[1]/div/span")).Text;
-            var amountBTCs = tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[2]/span")).Text;
-            var atPrice = tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[4]/span")).Text;
-            var orderDetails = buySellSide + " " + amountBTCs + " at " + atPrice + " USD/BTC" + "--------" + DateTimeOffset.Now.ToString();
-            File.AppendAllLines(HyperParameters.LogFilePath,
-            new[] { orderDetails });
-            return orderDetails;
-        }
-
-        /// <summary>
-        /// tries to find an web element from a web page
-        /// </summary>
-        /// <param name="elemXPath">the string represent XPath of the element in the web page</param>
-        /// <param name="element">the variable that hold the element if it found</param>
-        /// <returns>true if the element found, and false otherwise</returns>
-        private static bool TryFindElement(IWebDriver webDriver, string elemXPath, out IWebElement element)
-        {
-            try
-            {
-                InitializeElement(webDriver, out element, elemXPath);
-            }
-            catch (NoSuchElementException)
-            {
-                element = null;
-                return false;
-            }
-            return true;
+            return new Tuple<decimal, decimal>(enumerator0.Current.Size, enumerator1.Current.Size);
         }
 
         /// <summary>
@@ -290,46 +165,14 @@ namespace GUI
         /// saves details of filled order
         /// </summary>
         /// <param name="filledOrderDetails">where to save details of filled orders</param>
-        private static void CancelAllOrders(ref string filledOrderDetails)
+        private static void CancelAllOrders()
         {
-            var orderIndex = 1;
-            while (true)
+            Task.Run(async () =>
             {
-                try
-                {
-                    var orderStatus = tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[6]/span")).Text;
-
-                    if (orderStatus == "Filled")
-                    {
-                        var orderDetails = WriteFilledTransactionToLogFile(orderIndex);
-                        filledOrderDetails += orderDetails + "\n";
-                    }
-
-                    var buySellSide = tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[1]/div/span")).Text;
-                    tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[7]/div")).Click();
-                    if (orderStatus == "Open" || orderStatus == "Filled")
-                    {
-                        orderExists = false;
-                        if (orderStatus == "Open")
-                        {
-                            if (buySellSide == "Buy")
-                            {
-                                turnOfBuying = true;
-                            }
-                            else
-                            {
-                                turnOfBuying = false;
-                            }
-                        }
-                    }
-
-                    orderIndex += 1;
-                }
-                catch (Exception)
-                {
-                    break;
-                }
-            }
+                await MainWindow.coinbaseProClient.OrdersService.CancelAllOrdersAsync();
+                currentOpenOderId = "";
+                turnOfBuying = !turnOfBuying;
+            });
         }
 
         /// <summary>
@@ -341,25 +184,22 @@ namespace GUI
         /// <param name="saleAndBuyBTCsVolumeAtOptimal">BTC volume of lowest price sell demand and highest price buy demand</param>
         /// <param name="currentBTCPrice">current market price of BTC</param>
         private static void ConsiderToCancelOpenOrders(
-            ref string filledOrderDetails, 
-            Tuple<double, double> saleAndBuyBTCsVolumeAtOptimal,
-            double currentBTCPrice)
+            Tuple<decimal, decimal> saleAndBuyBTCsVolumeAtOptimal,
+            decimal currentBTCPrice)
         {
-            int orderIndex = 1;
-            while (true)
+            if (!currentOpenOderId.Equals(""))
             {
-                try
+                Task.Run(async () =>
                 {
-                    var orderStatus = tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[6]/span")).Text;
-                    if (orderStatus == "Open")
+                    var order = await MainWindow.coinbaseProClient.OrdersService.GetOrderByIdAsync(currentOpenOderId);
+                    if (order.Status.Equals(CoinbasePro.Services.Orders.Types.OrderStatus.Open))
                     {
                         if (turnOfBuying)
                         {
                             if (saleAndBuyBTCsVolumeAtOptimal.Item1 - saleAndBuyBTCsVolumeAtOptimal.Item2 > HyperParameters.BTCBuyOrSellDemandMuchGreaterThanOther)
                             {
-                                InitializeElement(tradingWebDriver, out IWebElement cancelOrderButton, CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[7]/div");
-                                cancelOrderButton.Click();
-                                orderExists = false;
+                                await MainWindow.coinbaseProClient.OrdersService.CancelOrderByIdAsync(currentOpenOderId);
+                                currentOpenOderId = "";
                                 turnOfBuying = false;
                             }
                         }
@@ -368,45 +208,23 @@ namespace GUI
                             if ((currentBTCPrice - buyPriceOfBTC > HyperParameters.CancelWhenOrderTooFarFromCurrentBTCPrice) ||
                                 (saleAndBuyBTCsVolumeAtOptimal.Item2 - saleAndBuyBTCsVolumeAtOptimal.Item1 < HyperParameters.DiffBTCsBetweenCurrSellAndBuyToCancelAll))
                             {
-                                InitializeElement(tradingWebDriver, out IWebElement cancelOrderButton, CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[7]/div");
-                                cancelOrderButton.Click();
-                                orderExists = false;
+                                await MainWindow.coinbaseProClient.OrdersService.CancelOrderByIdAsync(currentOpenOderId);
+                                currentOpenOderId = "";
                                 turnOfBuying = true;
                             }
                         }
                     }
                     else
                     {
-                        if (orderStatus == "Filled")
-                        {
-                            var orderDetails = WriteFilledTransactionToLogFile(orderIndex);
-                            filledOrderDetails += orderDetails + "\n";
-                        }
-
-                        tradingWebDriver.FindElement(By.XPath(CoinBaseXPaths.CommonPartOfXPathOfReportedOrderDetail + "[" + orderIndex.ToString() + "]/div[7]/div")).Click();
-                        orderExists = false;
+                        currentOpenOderId = "";
                     }
-
-                    orderIndex += 1;
-                }
-                catch (Exception)
-                {
-                    break;
-                }
+                });    
             }
         }
 
-        public static double GetCurrentBTCPrice()
+        public static void CheckStableStatusOfBTCPrice(ref bool isBTCPriceUnstable, decimal currentBTCPrice)
         {
-            InitializeElement(analyzeWebDriver, out IWebElement priceLb, CoinBaseXPaths.LastTradPriceLabel);
-            var currentBTCPrice = double.Parse(priceLb.Text.Split(' ')[0],
-                    System.Globalization.NumberStyles.AllowThousands | System.Globalization.NumberStyles.AllowDecimalPoint);
-            return currentBTCPrice;
-        }
-
-        public static void CheckStableStatusOfBTCPrice(ref bool isBTCPriceUnstable, double currentBTCPrice)
-        {
-            if ((DateTimeOffset.Now - timeAtCurrentStablePrice).TotalSeconds <= HyperParameters.MaxNumOfSecondBetween2StablePricesShowsUnstable)
+            if ((decimal)(DateTimeOffset.Now - timeAtCurrentStablePrice).TotalSeconds <= HyperParameters.MaxNumOfSecondBetween2StablePricesShowsUnstable)
             {
                 if (Math.Abs(currentBTCPrice - stableBTCPrice) >= HyperParameters.BTCPriceSignificantChangeValue)
                 {

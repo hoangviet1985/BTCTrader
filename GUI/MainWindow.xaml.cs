@@ -1,10 +1,12 @@
-﻿using OpenQA.Selenium;
+﻿using CoinbasePro.Network.Authentication;
+using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Interactions;
 using System;
 using System.Net;
 using System.Net.Mail;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Timers;
 using System.Windows;
 
@@ -18,6 +20,9 @@ namespace GUI
         private System.Timers.Timer tradingTimer;
         private bool tradingTimerAllowedToRun;
         private System.Timers.Timer analyzingTimer;
+        public static Authenticator authenticator;
+        public static CoinbasePro.CoinbaseProClient coinbaseProClient;
+        public static Tuple<string, string> BTCUSDAccIds;
 
         public MainWindow()
         {
@@ -29,164 +34,113 @@ namespace GUI
             tradingTimer.Interval = 100;
 
             analyzingTimer = new System.Timers.Timer(); ;
-            analyzingTimer.Elapsed += new ElapsedEventHandler(AnalyzeCycleOnCoinBase);
+            analyzingTimer.Elapsed += new ElapsedEventHandler(AnalyzeCycleOnCoinBaseAsync);
             analyzingTimer.Interval = 100;
+
+            //create an authenticator with your apiKey, apiSecret and passphrase
+            authenticator = new Authenticator("ce8087cbab12f326bec1b42019d60f02", "1ldF5+gbHY+zEvXiHAYvX9LI7h5+4D9SImfW9VHSpYGiU3famiu28tf2FioWZNlVSNbfj0ZaQXenJrOG1e0WVA==", "d10b8orvuz");
+
+            //create the CoinbasePro client
+            coinbaseProClient = new CoinbasePro.CoinbaseProClient(authenticator);
+
+            Task<Tuple<string, string>> task = Task.Run<Tuple<string, string>>(async () => await GetBTCAndUSDAccountIDs());
+            BTCUSDAccIds = task.Result;
         }
 
-        private void AnalyzeCycleOnCoinBase(object sender, ElapsedEventArgs e)
+        private async Task<Tuple<string, string>> GetBTCAndUSDAccountIDs()
+        {
+            //get account ids
+            var getAllAccountsResponse = await coinbaseProClient.AccountsService.GetAllAccountsAsync();
+            string BTCid = "";
+            string USDid = "";
+            var enumerator1 = getAllAccountsResponse.GetEnumerator();
+            while (enumerator1.MoveNext())
+            {
+                if (enumerator1.Current.Currency.ToString().Equals("BTC"))
+                {
+                    BTCid = enumerator1.Current.Id.ToString();
+                }
+                else if (enumerator1.Current.Currency.ToString().Equals("USD"))
+                {
+                    USDid = enumerator1.Current.Id.ToString();
+                }
+            }
+
+            return new Tuple<string, string>(BTCid, USDid);
+        }
+
+        private async void AnalyzeCycleOnCoinBaseAsync(object sender, ElapsedEventArgs e)
         {
             // Disable timer to avoid creating many analysis tasks at the same time
             analyzingTimer.Enabled = false;
-            try
+
+            var productsOrderBookResponse = await coinbaseProClient.ProductsService.GetProductOrderBookAsync(CoinbasePro.Shared.Types.ProductType.BtcUsd, CoinbasePro.Services.Products.Types.ProductLevel.One);
+            var enumerator = productsOrderBookResponse.Asks.GetEnumerator();
+            enumerator.MoveNext();
+            var currentBTCPrice = enumerator.Current.Price;
+            // prints last trade price of BTC from CoinBase
+            lastTracePriceLb.Dispatcher.Invoke(() => lastTracePriceLb.Content = currentBTCPrice);
+            CoinBaseOperations.CheckStableStatusOfBTCPrice(
+                ref CoinBaseOperations.isBTCPriceUnstable, currentBTCPrice);
+
+            // set a fix price to track when BTC price approaching this price
+            string priceToAlarmText = "";
+            priceToAlarmTb.Dispatcher.Invoke(() => priceToAlarmText = priceToAlarmTb.Text);
+            if (decimal.TryParse(priceToAlarmText, out decimal priceToAlarm) == false)
             {
-                var currentBTCPrice = CoinBaseOperations.GetCurrentBTCPrice();
-                CoinBaseOperations.CheckStableStatusOfBTCPrice(
-                    ref CoinBaseOperations.isBTCPriceUnstable, currentBTCPrice);
-                string priceToAlarmText = "";
-                priceToAlarmTb.Dispatcher.Invoke(() => priceToAlarmText = priceToAlarmTb.Text);
-                if (double.TryParse(priceToAlarmText, out double priceToAlarm) == false)
-                {
-                    priceToAlarm = 0;
-                }
-                if(Math.Abs(priceToAlarm - currentBTCPrice) <= HyperParameters.AlarmTolerance)
-                {
-                    CoinBaseOperations.SendUrgentMessage("Tin khan cap!", "Gia BTC dang gan muc bao dong " + priceToAlarmText + " USD");
-                }
+                priceToAlarm = 0;
             }
-            catch (Exception ex)
+            if(Math.Abs(priceToAlarm - currentBTCPrice) <= HyperParameters.AlarmTolerance)
             {
-                if ((ex is NullReferenceException) ||
-                    (ex is WebDriverException) ||
-                    CoinBaseOperations.IsBrowserClosed(CoinBaseOperations.analyzeWebDriver))
-                {
-                    InitializeCoinBaseEnvironmentForAnalyzing();
-                }
+                CoinBaseOperations.SendUrgentMessage("Tin khan cap!", "Gia BTC dang gan muc bao dong " + priceToAlarmText + " USD");
             }
+            //
             analyzingTimer.Enabled = true;
         }
 
-        private void TradeCycleOnCoinBase(object source, ElapsedEventArgs e)
+        private async void TradeCycleOnCoinBase(object source, ElapsedEventArgs e)
         {
             // Disable timer to avoid creating many analysis tasks at the same time
             tradingTimer.Enabled = false;
-            try
+
+            var BTCAcc = await coinbaseProClient.AccountsService.GetAccountByIdAsync(BTCUSDAccIds.Item1);
+            var USDAcc = await coinbaseProClient.AccountsService.GetAccountByIdAsync(BTCUSDAccIds.Item2);
+            // gets number of BTCs current user has
+            currentBTCLb.Dispatcher.Invoke(() => currentBTCLb.Content = BTCAcc.Balance);
+            // gets USD current user has
+            currentUSDLb.Dispatcher.Invoke(() => currentUSDLb.Content = USDAcc.Balance);
+
+            // gets minimum asked price of BTC (current BTC price)
+            var productsOrderBookResponse = await coinbaseProClient.ProductsService.GetProductOrderBookAsync(CoinbasePro.Shared.Types.ProductType.BtcUsd, CoinbasePro.Services.Products.Types.ProductLevel.One);
+            var enumerator = productsOrderBookResponse.Asks.GetEnumerator();
+            enumerator.MoveNext();
+            var currentBTCPrice = enumerator.Current.Price;
+
+            // gets all filled orders user made since the app started running
+            // considers open orders to keep or cancel them
+            var filledOrdersDetails = CoinBaseOperations.DealWithExistingOrders(currentBTCPrice, coinbaseProClient);
+            transactionDetailTb.Dispatcher.Invoke(() => transactionDetailTb.Text = filledOrdersDetails);
+
+            // given current status of trading market, decides whether or not to buy or sell BTCc
+            var numBTCToBuyStr = "";
+            numBTCToBuyTb.Dispatcher.Invoke(() => numBTCToBuyStr = numBTCToBuyTb.Text);
+            var numBTCToSellStr = "";
+            numBTCToSellTb.Dispatcher.Invoke(() => numBTCToSellStr = numBTCToSellTb.Text);
+            // consider to make transactions only when BTC is unstable
+            if (Decimal.TryParse(numBTCToBuyStr, out decimal numBTCToBuy) && 
+                Decimal.TryParse(numBTCToSellStr, out decimal numBTCToSell))
             {
-                // gets last trade price of BTC from CoinBase
-                CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.lastTradePriceElem, CoinBaseXPaths.LastTradPriceLabel);
-                var tempStr = CoinBaseOperations.lastTradePriceElem.Text;
-                lastTracePriceLb.Dispatcher.Invoke(() => lastTracePriceLb.Content = tempStr);
-
-                // gets number of BTCs current user has
-                CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.currentBTCElem, CoinBaseXPaths.CurrentBTCOfUser);
-                currentBTCLb.Dispatcher.Invoke(() => currentBTCLb.Content = CoinBaseOperations.currentBTCElem.Text);
-
-                // gets USD current user has
-                CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.currentUSDElem, CoinBaseXPaths.CurrentUSDOfUser);
-                currentUSDLb.Dispatcher.Invoke(() => currentUSDLb.Content = CoinBaseOperations.currentUSDElem.Text);
-                var currentBTCPrice = double.Parse(tempStr.Split(' ')[0], 
-                    System.Globalization.NumberStyles.AllowThousands | System.Globalization.NumberStyles.AllowDecimalPoint);
-
-                // gets all filled orders user made since the app started running
-                // considers open orders to keep or cancel them
-                var filledOrdersDetails = CoinBaseOperations.DealWithExistingOrders(currentBTCPrice);
-                transactionDetailTb.Dispatcher.Invoke(() => transactionDetailTb.Text += filledOrdersDetails);
-
-                // given current status of trading market, decides whether or not to buy or sell BTCc
-                var numBTCToBuy = "";
-                numBTCToBuyTb.Dispatcher.Invoke(() => numBTCToBuy = numBTCToBuyTb.Text);
-                var numBTCToSell = "";
-                numBTCToSellTb.Dispatcher.Invoke(() => numBTCToSell = numBTCToSellTb.Text);
-                // consider to make transactions only when BTC is unstable
                 if (CoinBaseOperations.isBTCPriceUnstable)
                 {
                     CoinBaseOperations.ConsiderToBuyOrSell(currentBTCPrice, numBTCToBuy, numBTCToSell);
                 }
             }
-            catch (Exception ex)
-            {
-                if ((ex is NullReferenceException) || 
-                    (ex is WebDriverException) ||
-                    CoinBaseOperations.IsBrowserClosed(CoinBaseOperations.tradingWebDriver))
-                {
-                    InitializeCoinBaseEnvironmentForTrading();
-                }
-            }
+
             // enable timer for next cycle
             if (tradingTimerAllowedToRun)
             {
                 tradingTimer.Enabled = true;
             }
-        }
-
-        /// <summary>
-        /// Initializes all necessary CoinBase web elements for trading
-        /// Brings user to the page that trading operation can be made
-        /// </summary>
-        private void InitializeCoinBaseEnvironmentForTrading()
-        {
-            if (CoinBaseOperations.tradingWebDriver != null)
-            {
-                CoinBaseOperations.tradingWebDriver.Quit();
-            }
-            CoinBaseOperations.tradingWebDriver = new ChromeDriver();
-            // goes to CoinBase home page
-            CoinBaseOperations.tradingWebDriver.Navigate().GoToUrl(HyperParameters.HomeUrl);
-            // goes to login page
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out IWebElement switchToLoginPageBtt, CoinBaseXPaths.SwitchToLoginPageButton);
-            switchToLoginPageBtt.Click();
-            // fills out user's credentials and logs user in
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out IWebElement email, CoinBaseXPaths.LoginEmailTextBox);
-            emailTb.Dispatcher.Invoke(() => email.SendKeys(emailTb.Text));
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out IWebElement password, CoinBaseXPaths.LoginPasswordTextBox);
-            passwordTb.Dispatcher.Invoke(() => password.SendKeys(passwordTb.Password));
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out IWebElement loginBtt, CoinBaseXPaths.ClickToLogInButton);
-            loginBtt.Click();
-            // stops for 20 seconds for user to receive passcode from their phone and
-            // enter passcode to the page before continue to load other web elements
-            Thread.Sleep(20000);
-            // initializes some variables to hold some web elements
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.lastTradePriceElem, CoinBaseXPaths.LastTradPriceLabel);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.currentBTCElem, CoinBaseXPaths.CurrentBTCOfUser);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.currentUSDElem, CoinBaseXPaths.CurrentUSDOfUser);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.switchToLimitTabElem, CoinBaseXPaths.LimitTab);
-            // click on limit tab of trading page
-            CoinBaseOperations.switchToLimitTabElem.Click();
-            // initializes variables of web elements that only appear when limit tab clicked
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.numBTCToBuySellElem, CoinBaseXPaths.LimitModeInputBTCsToBuySellTextBox);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.setSellBuyPriceElem, CoinBaseXPaths.LimitModeInputBTCPriceTextBox);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out IWebElement setPostOnlyButtonElem, CoinBaseXPaths.PostOnlyButton);
-            // makes sure all future order is in post mode
-            setPostOnlyButtonElem.Click();
-            // initializes some variables holding some web elements
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.switchToBuyTabElem, CoinBaseXPaths.BuyTab);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.switchToSellTabElem, CoinBaseXPaths.SellTab);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.placeBuySaleOrderButtonElem, CoinBaseXPaths.PlaceOrderButton);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.tradingSwitchToDepthChartElem, CoinBaseXPaths.DepthChartButton);
-            CoinBaseOperations.tradingSwitchToDepthChartElem.Click();
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.tradingWebDriver, out CoinBaseOperations.tradingDepthChartCanvasElem, CoinBaseXPaths.DepthChartCanvas);
-        }
-
-        /// <summary>
-        /// Initializes all necessary CoinBase web elements for trading
-        /// Brings user to the page that trading operation can be made
-        /// </summary>
-        private void InitializeCoinBaseEnvironmentForAnalyzing()
-        {
-            if (CoinBaseOperations.analyzeWebDriver != null)
-            {
-                CoinBaseOperations.analyzeWebDriver.Quit();
-            }
-            var options = new ChromeOptions();
-            options.AddArgument("--start-maximized");
-            CoinBaseOperations.analyzeWebDriver = new ChromeDriver(options);
-            // goes to CoinBase home page
-            CoinBaseOperations.analyzeWebDriver.Navigate().GoToUrl(HyperParameters.HomeUrl);
-            // initializes some variables holding some web elements
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.analyzeWebDriver, out CoinBaseOperations.switchToDepthChartElem, CoinBaseXPaths.DepthChartButton);
-            CoinBaseOperations.switchToDepthChartElem.Click();
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.analyzeWebDriver, out CoinBaseOperations.BTCsOfHighestPriceBuyDemandElem, CoinBaseXPaths.MarketModeInputBTCsToSellTextBox);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.analyzeWebDriver, out CoinBaseOperations.BTCsOfLowestPriceSellDemandElem, CoinBaseXPaths.NumOfBTCsWhenClickOnLastLineSellPartOrderBook);
-            CoinBaseOperations.InitializeElement(CoinBaseOperations.analyzeWebDriver, out CoinBaseOperations.depthChartCanvasElem, CoinBaseXPaths.DepthChartCanvas);
         }
 
         private void StartButtonClick(object sender, RoutedEventArgs e)

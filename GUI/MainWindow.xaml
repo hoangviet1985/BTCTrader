@@ -20,10 +20,7 @@
                 </TransformGroup>
             </Button.RenderTransform>
         </Button>
-        <Label Content="Email" HorizontalAlignment="Left" Height="21" Margin="329,39,0,0" VerticalAlignment="Top" Width="66" Background="#FF514C4C" Foreground="#FFEE6B16" FontSize="10"/>
-        <Label Content="Password" HorizontalAlignment="Left" Height="21" Margin="329,65,0,0" VerticalAlignment="Top" Width="66" Background="#FF514C4C" Foreground="#FFEE6B16" FontSize="10"/>
-        <TextBox x:Name="emailTb" HorizontalAlignment="Left" Height="21" Margin="400,39,0,0" TextWrapping="Wrap" Text="viethoangdinh0503@gmail.com" VerticalAlignment="Top" Width="233" FontSize="10"/>
-        <PasswordBox x:Name="passwordTb" HorizontalAlignment="Left" Margin="400,65,0,0" VerticalAlignment="Top" Width="233" Height="20" FontSize="10" Password="xxxxxxxx"/>
+        
         <TextBlock x:Name="errorTb" HorizontalAlignment="Left" Height="110" Margin="0,310,-0.4,0" TextWrapping="Wrap" Text="" VerticalAlignment="Top" Width="794" Foreground="#FFE20808" Background="#FFCAC3C3"/>
         <Label Content="Current USD" HorizontalAlignment="Left" Height="30" Margin="42,100,0,0" VerticalAlignment="Top" Width="93" Background="#FF514C4C" Foreground="#FFEE6B16"/>
         <Label x:Name="currentUSDLb" Content="" HorizontalAlignment="Left" Height="30" Margin="140,100,0,0" VerticalAlignment="Top" Width="119" Background="#FF514C4C" Foreground="#FFEE6B16" FontSize="14" FontWeight="Bold"/>
@@ -33,8 +30,8 @@
         <Label Content="BTC to Buy" HorizontalAlignment="Left" Height="30" Margin="42,135,0,0" VerticalAlignment="Top" Width="93" Background="#FF514C4C" Foreground="#FFEE6B16"/>
         <TextBox x:Name="numBTCToBuyTb" HorizontalAlignment="Left" Height="30" Margin="140,135,0,0" TextWrapping="Wrap" Text="0.001" VerticalAlignment="Top" Width="120" />
         <TextBox x:Name="numBTCToSellTb" HorizontalAlignment="Left" Height="30" Margin="140,170,0,0" TextWrapping="Wrap" Text="0.001" VerticalAlignment="Top" Width="120"/>
-        <ScrollViewer Margin="329,106,28.6,205">
-            <TextBlock x:Name="transactionDetailTb" HorizontalAlignment="Left" Height="109" TextWrapping="Wrap" VerticalAlignment="Top" Width="417" Background="#FFD3E7DA" Foreground="#FF0750DF" RenderTransformOrigin="-0.731,-0.478"/>
+        <ScrollViewer Margin="329,30,28.6,185">
+            <TextBlock x:Name="transactionDetailTb" HorizontalAlignment="Left" Height="203" TextWrapping="Wrap" VerticalAlignment="Top" Width="417" Background="#FFD3E7DA" Foreground="#FF0750DF" RenderTransformOrigin="-0.731,-0.478"/>
         </ScrollViewer>
         <Button x:Name="pauseTradingBtt" Content="Stop trading
                 " HorizontalAlignment="Left" Margin="565,278,0,0" VerticalAlignment="Top" Width="75" FontSize="11" Click="PauseTrading"/>
