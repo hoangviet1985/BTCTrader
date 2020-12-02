@@ -38,7 +38,7 @@ namespace GUI
             analyzingTimer.Interval = 100;
 
             //create an authenticator with your apiKey, apiSecret and passphrase
-            authenticator = new Authenticator("ce8087cbab12f326bec1b42019d60f02", "1ldF5+gbHY+zEvXiHAYvX9LI7h5+4D9SImfW9VHSpYGiU3famiu28tf2FioWZNlVSNbfj0ZaQXenJrOG1e0WVA==", "d10b8orvuz");
+            authenticator = new Authenticator("secret1", "secret2", "secret3");
 
             //create the CoinbasePro client
             coinbaseProClient = new CoinbasePro.CoinbaseProClient(authenticator);
