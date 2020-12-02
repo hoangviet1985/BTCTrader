@@ -63,8 +63,8 @@ namespace GUI
 
         public const decimal FeePriceRatio = 0.0015M;
 
-        public const string fromAddress = "hoangviet26985@gmail.com";
-        public const string toAddresses = "6176103632@tmomail.net";
-        public const string fromPassword = "vietbo1985";
+        public const string fromAddress = "user_email@domain.com";
+        public const string toAddresses = "phone#@tmomail.net";
+        public const string fromPassword = "email_password";
     }
 }
